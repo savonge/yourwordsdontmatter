@@ -8,6 +8,16 @@
   <!-- Include the Inter font from Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet">
   <style>
+    /* Set the root font size: desktop defaults to 16px (20rem = 320px) */
+    html {
+      font-size: 16px;
+    }
+    /* On smaller screens, reduce the root font size so that 20rem scales down */
+    @media (max-width: 600px) {
+      html {
+        font-size: 12px; /* 20rem becomes 240px */
+      }
+    }
     /* Reset margins and set background */
     html, body {
       margin: 0;
@@ -29,27 +39,28 @@
       max-width: 500px;
       margin: 0 auto;
     }
+    /* Updated control styling using rem units */
     #textInput {
-      font-size: 16px;
-      padding: 8px;
+      font-size: 1rem;
+      padding: 0.5rem;
       width: calc(100% - 110px);
-      border-radius: 8px;
+      border-radius: 0.5rem;
       border: none;
       outline: none;
       background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.1);
     }
     #submitBtn {
-      font-size: 16px;
-      padding: 8px 12px;
-      margin-left: 8px;
+      font-size: 1rem;
+      padding: 0.5rem 0.75rem;
+      margin-left: 0.5rem;
       border: none;
       outline: none;
-      border-radius: 8px;
+      border-radius: 0.5rem;
       background: #000;
       color: #fff;
       cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.1);
     }
     /* Ensure the canvas covers the entire viewport */
     canvas {
@@ -67,6 +78,28 @@
   <!-- Matter.js library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <script>
+    // Helper function to compute the current font size in pixels based on rem value.
+    // Here, 20rem is used (which equals 320px on desktop and adjusts on mobile).
+    function getCurrentFontSizePx() {
+      const fontSizeRem = 20; // desired font size in rem
+      const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return fontSizeRem * rootFontSize;
+    }
+
+    // Updated function to measure the actual width of a letter.
+    // Uses actual bounding box properties if available for a tighter fit.
+    function measureTextWidth(letter, fontSpec) {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      context.font = fontSpec;
+      const metrics = context.measureText(letter);
+      if ('actualBoundingBoxLeft' in metrics && 'actualBoundingBoxRight' in metrics) {
+        // Use the sum of the left and right bounding boxes to get the true visual width.
+        return metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight;
+      }
+      return metrics.width;
+    }
+
     // Module aliases for Matter.js
     const Engine = Matter.Engine,
           Render = Matter.Render,
@@ -142,40 +175,32 @@
       Matter.Body.setPosition(rightWall, { x: window.innerWidth + wallThickness / 2, y: window.innerHeight / 2 });
     });
 
-    // Function to measure text width using a temporary canvas context
-    // Using the falling letter font specification (320px Inter)
-    function measureTextWidth(letter, fontSpec) {
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      context.font = fontSpec;
-      return context.measureText(letter).width;
-    }
-
     // Function to create a letter body
     function createLetter(letter, startX, startY) {
-      // Define font properties for the falling letter (320px Inter)
-      const fontSize = 320;
-      const fontSpec = fontSize + "px Inter";
-      // Measure the width of the letter
+      // Get computed font size in pixels (based on 20rem)
+      const fontSizePx = getCurrentFontSizePx();
+      // Define font properties for the falling letter
+      const fontSpec = fontSizePx + "px Inter";
+      // Measure the width of the letter using the updated function.
       const textWidth = measureTextWidth(letter, fontSpec);
       // Create a rectangle body with the dimensions of the text.
       const body = Bodies.rectangle(
         startX,
         startY,
         textWidth,
-        fontSize,
+        fontSizePx,
         {
           restitution: 0.6, // bounciness
           friction: 0.1,
           frictionStatic: 0.1,
           density: 0.001,
-          slop: 0, // reduce collision slop so bodies don't leave gaps
+          slop: 0, // no extra collision margin
           render: { visible: false }
         }
       );
       // Save the letter and its font properties in the body for custom rendering.
       body.letter = letter;
-      body.fontSize = fontSize;
+      body.fontSize = fontSizePx;
       body.fontSpec = fontSpec;
       return body;
     }
@@ -204,10 +229,7 @@
     });
 
     // --- Input Behavior ---
-
     const textInput = document.getElementById('textInput');
-
-    // When the user focuses on the input, clear it and restore placeholder.
     textInput.addEventListener('focus', () => {
       if (textInput.value.trim() !== "") {
         textInput.value = "";
@@ -216,66 +238,57 @@
     });
 
     // --- Submit Behavior ---
-
     document.getElementById('submitBtn').addEventListener('click', function() {
       const inputText = textInput.value;
       if (!inputText) return;
       
-      // Instead of using a random x position for each letter, calculate positions so that:
-      // The letters appear side by side in the order typed.
-      const fontSpec = "320px Inter";
+      // Compute current font size in pixels (based on rem)
+      const fontSizePx = getCurrentFontSizePx();
+      const fontSpec = fontSizePx + "px Inter";
+      
+      // Calculate total width so the word is centered.
       const letterWidths = [];
       let totalWidth = 0;
-      
-      // Measure each letter and sum the widths.
       for (let i = 0; i < inputText.length; i++) {
         const w = measureTextWidth(inputText[i], fontSpec);
         letterWidths.push(w);
         totalWidth += w;
       }
       
-      // Compute starting x so that the whole word is centered.
-      // For each letter, we will position its center accordingly.
       let currentX = (window.innerWidth - totalWidth) / 2;
       
-      // For each letter, release it in order with a delay.
+      // Create each letter body with a delay.
       for (let i = 0; i < inputText.length; i++) {
         ((letter, delayIndex, letterWidth, posX) => {
           setTimeout(() => {
-            // posX is the center for the letter: currentX + letterWidth/2.
+            // Center the letter based on its width.
             const startX = posX + letterWidth / 2;
             // Starting Y position (above the visible area)
             const startY = -400;
             const letterBody = createLetter(letter, startX, startY);
             Composite.add(world, letterBody);
-          }, delayIndex * 400); // 400ms delay between each letter for slow-motion effect.
+          }, delayIndex * 400);
         })(inputText[i], i, letterWidths[i], currentX);
-        // Update currentX for the next letter.
         currentX += letterWidths[i];
       }
     });
 
     // --- Double-Click to Reset ---
-    // Attach double-click event on the Matter.js canvas.
     render.canvas.addEventListener('dblclick', (event) => {
-      // Get the mouse position relative to the canvas.
       const rect = render.canvas.getBoundingClientRect();
       const mousePoint = {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
       };
 
-      // Query for bodies under the mouse that represent letters.
       const bodies = Composite.allBodies(engine.world);
       const letterBodies = bodies.filter(body => body.letter);
       const hits = Query.point(letterBodies, mousePoint);
 
       if (hits.length > 0) {
-        // Reset simulation: remove all letter bodies.
         letterBodies.forEach(body => {
           Composite.remove(world, body);
         });
-        // Optionally, clear the input field.
         textInput.value = "";
       }
     });
