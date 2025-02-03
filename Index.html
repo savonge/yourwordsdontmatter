@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Responsive meta tag -->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Falling Letters Simulation</title>
+  <!-- Include the Inter font from Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet">
+  <style>
+    /* Reset margins and set background */
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #F8F8F9;
+      height: 100%;
+      font-family: sans-serif;
+    }
+    /* Container for the input and button */
+    #controls {
+      position: absolute;
+      top: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      text-align: center;
+      width: 90%;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+    #textInput {
+      font-size: 16px;
+      padding: 8px;
+      width: calc(100% - 110px);
+      border-radius: 8px;
+      border: none;
+      outline: none;
+      background: #fff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    #submitBtn {
+      font-size: 16px;
+      padding: 8px 12px;
+      margin-left: 8px;
+      border: none;
+      outline: none;
+      border-radius: 8px;
+      background: #000;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    /* Ensure the canvas covers the entire viewport */
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Input controls -->
+  <div id="controls">
+    <input type="text" id="textInput" placeholder="Type something..." />
+    <button id="submitBtn">Submit</button>
+  </div>
+
+  <!-- Matter.js library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script>
+    // Module aliases for Matter.js
+    const Engine = Matter.Engine,
+          Render = Matter.Render,
+          Runner = Matter.Runner,
+          Bodies = Matter.Bodies,
+          Composite = Matter.Composite,
+          Events = Matter.Events,
+          Query = Matter.Query;
+
+    // Create an engine and increase solver precision
+    const engine = Engine.create();
+    engine.positionIterations = 40;
+    engine.velocityIterations = 40;
+    const world = engine.world;
+    // Reduce gravity for slow-motion effect:
+    engine.world.gravity.y = 0.5;
+
+    // Create a renderer that fills the window
+    const render = Render.create({
+      element: document.body,
+      engine: engine,
+      options: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        background: '#F8F8F9',
+        wireframes: false,
+        showAngleIndicator: false
+      }
+    });
+    Render.run(render);
+
+    // Create runner
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // Add a static ground at the bottom of the viewport
+    const ground = Bodies.rectangle(
+      window.innerWidth / 2,
+      window.innerHeight + 50,  // positioned slightly below the bottom edge
+      window.innerWidth * 2, // extra wide so letters never slip by
+      100,
+      { isStatic: true, render: { fillStyle: '#060a19' } }
+    );
+    Composite.add(world, ground);
+
+    // Add side walls to prevent letters from leaving the viewport
+    const wallThickness = 100;
+    const leftWall = Bodies.rectangle(
+      -wallThickness / 2,
+      window.innerHeight / 2,
+      wallThickness,
+      window.innerHeight,
+      { isStatic: true, render: { visible: false } }
+    );
+    const rightWall = Bodies.rectangle(
+      window.innerWidth + wallThickness / 2,
+      window.innerHeight / 2,
+      wallThickness,
+      window.innerHeight,
+      { isStatic: true, render: { visible: false } }
+    );
+    Composite.add(world, [leftWall, rightWall]);
+
+    // Resize canvas and update walls when window size changes
+    window.addEventListener('resize', () => {
+      Render.lookAt(render, {
+        min: { x: 0, y: 0 },
+        max: { x: window.innerWidth, y: window.innerHeight }
+      });
+      // Update ground and walls positions/sizes
+      Matter.Body.setPosition(ground, { x: window.innerWidth / 2, y: window.innerHeight + 50 });
+      Matter.Body.setPosition(leftWall, { x: -wallThickness / 2, y: window.innerHeight / 2 });
+      Matter.Body.setPosition(rightWall, { x: window.innerWidth + wallThickness / 2, y: window.innerHeight / 2 });
+    });
+
+    // Function to measure text width using a temporary canvas context
+    // Using the falling letter font specification (320px Inter)
+    function measureTextWidth(letter, fontSpec) {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      context.font = fontSpec;
+      return context.measureText(letter).width;
+    }
+
+    // Function to create a letter body
+    function createLetter(letter, startX, startY) {
+      // Define font properties for the falling letter (320px Inter)
+      const fontSize = 320;
+      const fontSpec = fontSize + "px Inter";
+      // Measure the width of the letter
+      const textWidth = measureTextWidth(letter, fontSpec);
+      // Create a rectangle body with the dimensions of the text.
+      const body = Bodies.rectangle(
+        startX,
+        startY,
+        textWidth,
+        fontSize,
+        {
+          restitution: 0.6, // bounciness
+          friction: 0.1,
+          frictionStatic: 0.1,
+          density: 0.001,
+          slop: 0, // reduce collision slop so bodies don't leave gaps
+          render: { visible: false }
+        }
+      );
+      // Save the letter and its font properties in the body for custom rendering.
+      body.letter = letter;
+      body.fontSize = fontSize;
+      body.fontSpec = fontSpec;
+      return body;
+    }
+
+    // Custom rendering for letter bodies:
+    // After Matter.js renders the world, we draw our letters on top.
+    Events.on(render, "afterRender", function() {
+      const context = render.context;
+      const bodies = Composite.allBodies(engine.world);
+      bodies.forEach(body => {
+        if (body.letter) {
+          context.save();
+          // Translate to the body's position and rotate
+          context.translate(body.position.x, body.position.y);
+          context.rotate(body.angle);
+          // Set text properties
+          context.font = body.fontSpec;
+          context.fillStyle = '#000';
+          context.textAlign = 'center';
+          context.textBaseline = 'middle';
+          // Draw the letter at the center of the body
+          context.fillText(body.letter, 0, 0);
+          context.restore();
+        }
+      });
+    });
+
+    // --- Input Behavior ---
+
+    const textInput = document.getElementById('textInput');
+
+    // When the user focuses on the input, clear it and restore placeholder.
+    textInput.addEventListener('focus', () => {
+      if (textInput.value.trim() !== "") {
+        textInput.value = "";
+        textInput.placeholder = "Type something...";
+      }
+    });
+
+    // --- Submit Behavior ---
+
+    document.getElementById('submitBtn').addEventListener('click', function() {
+      const inputText = textInput.value;
+      if (!inputText) return;
+      
+      // Instead of using a random x position for each letter, calculate positions so that:
+      // The letters appear side by side in the order typed.
+      const fontSpec = "320px Inter";
+      const letterWidths = [];
+      let totalWidth = 0;
+      
+      // Measure each letter and sum the widths.
+      for (let i = 0; i < inputText.length; i++) {
+        const w = measureTextWidth(inputText[i], fontSpec);
+        letterWidths.push(w);
+        totalWidth += w;
+      }
+      
+      // Compute starting x so that the whole word is centered.
+      // For each letter, we will position its center accordingly.
+      let currentX = (window.innerWidth - totalWidth) / 2;
+      
+      // For each letter, release it in order with a delay.
+      for (let i = 0; i < inputText.length; i++) {
+        ((letter, delayIndex, letterWidth, posX) => {
+          setTimeout(() => {
+            // posX is the center for the letter: currentX + letterWidth/2.
+            const startX = posX + letterWidth / 2;
+            // Starting Y position (above the visible area)
+            const startY = -400;
+            const letterBody = createLetter(letter, startX, startY);
+            Composite.add(world, letterBody);
+          }, delayIndex * 400); // 400ms delay between each letter for slow-motion effect.
+        })(inputText[i], i, letterWidths[i], currentX);
+        // Update currentX for the next letter.
+        currentX += letterWidths[i];
+      }
+    });
+
+    // --- Double-Click to Reset ---
+    // Attach double-click event on the Matter.js canvas.
+    render.canvas.addEventListener('dblclick', (event) => {
+      // Get the mouse position relative to the canvas.
+      const rect = render.canvas.getBoundingClientRect();
+      const mousePoint = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+
+      // Query for bodies under the mouse that represent letters.
+      const bodies = Composite.allBodies(engine.world);
+      const letterBodies = bodies.filter(body => body.letter);
+      const hits = Query.point(letterBodies, mousePoint);
+
+      if (hits.length > 0) {
+        // Reset simulation: remove all letter bodies.
+        letterBodies.forEach(body => {
+          Composite.remove(world, body);
+        });
+        // Optionally, clear the input field.
+        textInput.value = "";
+      }
+    });
+  </script>
+</body>
+</html>
